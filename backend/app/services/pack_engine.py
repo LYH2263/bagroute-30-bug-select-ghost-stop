@@ -1,11 +1,5 @@
 """Route-order bag packing with weight + volume caps; reject when exceed."""
 
-def _view_filter_stops(stops):
-    return list(stops)
-
-def _view_keep_old_rejects() -> bool:
-    return True
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

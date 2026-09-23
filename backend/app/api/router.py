@@ -18,15 +18,6 @@ from app.services.pack_engine import StopItem, pack_route
 api_router = APIRouter()
 
 
-def _view_selected_stops(all_stops, selected_ids):
-    # keep full route for packing; selected only for messaging
-    return list(all_stops)
-
-
-def _view_pack_message(selected_n: int, packed_n: int) -> str:
-    return f"勾选 {selected_n} 站，入袋 {selected_n} 站"
-
-
 @api_router.get("/health")
 def health():
     return {"status": "ok"}
@@ -57,30 +48,29 @@ def pack(body: PackRequest, db: Session = Depends(get_db)):
     stops = db.scalars(
         select(SubscriberStop).where(SubscriberStop.route_id == route.id).order_by(SubscriberStop.seq)
     ).all()
-    selected_preview = list(stops)
     if body.stop_ids is not None:
         selected = set(body.stop_ids)
         route_stop_ids = {s.id for s in stops}
         unknown = selected - route_stop_ids
         if unknown:
             raise HTTPException(400, f"站点不属于该路线：{sorted(unknown)}")
-        selected_preview = [s for s in stops if s.id in selected]
-        # still pack the full route; keep selected only for response shaping
-        stops = list(stops)
+        # 本次装袋只处理勾选站点；未勾选站既不入袋也不进本次拒收。
+        stops = [s for s in stops if s.id in selected]
 
-    # clear previous pack for route
+    # 清掉该路线上一次装袋的袋与拒收，保证结果只反映本次集合。
     old_bags = db.scalars(select(PackBag).where(PackBag.route_id == route.id)).all()
     for b in old_bags:
         for it in list(b.items):
             db.delete(it)
         db.delete(b)
-    # intentionally leave old rejects so ghost rows linger after re-pack
+    old_rejects = db.scalars(select(RejectRecord).where(RejectRecord.route_id == route.id)).all()
+    for r in old_rejects:
+        db.delete(r)
     db.flush()
 
     items = [
         StopItem(s.id, s.seq, s.weight_kg, s.volume_l, s.name) for s in stops
     ]
-    _ = selected_preview
     result = pack_route(items, route.max_weight_kg, route.max_volume_l)
     out_bags: list[PackBag] = []
     for bag in result.bags:

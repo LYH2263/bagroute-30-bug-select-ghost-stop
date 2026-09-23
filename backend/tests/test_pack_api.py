@@ -36,8 +36,8 @@ def _make_client():
     return client, TestingSession
 
 
-def _seed_route(db):
-    route = DeliveryRoute(name="测试线", max_weight_kg=8.0, max_volume_l=18.0)
+def _seed_route(db, name: str = "测试线"):
+    route = DeliveryRoute(name=name, max_weight_kg=8.0, max_volume_l=18.0)
     db.add(route)
     db.flush()
     db.add_all(
@@ -136,6 +136,55 @@ def test_full_route_pack_without_stop_ids_covers_all_stops():
 
     db = Session()
     assert _reject_stop_ids(db) == {stop_ids[3]}
+    db.close()
+
+
+def test_repack_clears_ghost_bags_and_rejects_for_route():
+    client, Session = _make_client()
+    db = Session()
+    route_id = _seed_route(db)
+    stop_ids = [s.id for s in db.scalars(select(SubscriberStop).order_by(SubscriberStop.seq)).all()]
+    db.close()
+    first_two, third, oversized = stop_ids[:2], stop_ids[2], stop_ids[3]
+
+    # 先整线装袋：四站都参与，超大站留下拒收
+    resp = client.post("/api/pack", json={"route_id": route_id})
+    assert resp.status_code == 200, resp.text
+    db = Session()
+    assert _packed_stop_ids(db) == set(stop_ids[:3])
+    assert _reject_stop_ids(db) == {oversized}
+    db.close()
+
+    # 再只勾选前两站重装：旧袋与旧拒收必须随本次集合重写
+    resp = client.post("/api/pack", json={"route_id": route_id, "stop_ids": first_two})
+    assert resp.status_code == 200, resp.text
+    db = Session()
+    assert _packed_stop_ids(db) == set(first_two)
+    assert third not in _packed_stop_ids(db)
+    assert _reject_stop_ids(db) == set()
+    assert oversized not in _reject_stop_ids(db)
+    db.close()
+
+
+def test_repack_does_not_touch_other_route_data():
+    client, Session = _make_client()
+    db = Session()
+    route_a = _seed_route(db)
+    route_b = _seed_route(db, "邻线")
+    a_ids = [s.id for s in db.scalars(select(SubscriberStop).where(SubscriberStop.route_id == route_a).order_by(SubscriberStop.seq)).all()]
+    b_ids = [s.id for s in db.scalars(select(SubscriberStop).where(SubscriberStop.route_id == route_b).order_by(SubscriberStop.seq)).all()]
+    db.close()
+
+    # 两条线都整线装袋，各有一条超大站拒收
+    assert client.post("/api/pack", json={"route_id": route_a}).status_code == 200
+    assert client.post("/api/pack", json={"route_id": route_b}).status_code == 200
+
+    # 对 A 线只勾前两站重装，B 线的袋与拒收原样保留
+    resp = client.post("/api/pack", json={"route_id": route_a, "stop_ids": a_ids[:2]})
+    assert resp.status_code == 200, resp.text
+    db = Session()
+    assert _reject_stop_ids(db) == {b_ids[3]}
+    assert {it.stop_id for it in db.scalars(select(BagItem)).all()} == set(a_ids[:2]) | set(b_ids[:3])
     db.close()
 
 
