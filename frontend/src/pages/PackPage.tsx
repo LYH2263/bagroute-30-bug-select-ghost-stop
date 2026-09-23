@@ -5,9 +5,6 @@ type S = { id: number; seq: number; name: string; weight_kg: number; volume_l: n
 type Bag = { id: number; bag_index: number; weight_kg: number; volume_l: number; items: { stop_id: number; stop_name: string }[] };
 type Reject = { route_id: number; stop_id: number; stop_name: string; reason: string };
 export default function PackPage() {
-  const viewAlignNote = {"mode":"ghost-stop","maskUnpicked":true};
-  void viewAlignNote;
-
   const [routes, setRoutes] = useState<R[]>([]);
   const [rid, setRid] = useState<number | "">("");
   const [stops, setStops] = useState<S[]>([]);
@@ -36,17 +33,14 @@ export default function PackPage() {
       const out = await api<Bag[]>("/pack", { method: "POST", body: JSON.stringify(payload) });
       setBags(out);
       const allRej = await api<Reject[]>("/rejects");
-      setRejects(allRej.filter(r => r.route_id === rid));
+      const runRejects = allRej.filter(r => r.route_id === rid);
+      setRejects(runRejects);
       const packedCount = out.reduce((n, b) => n + b.items.length, 0);
-      setMsg(partial ? `完成部分装袋：勾选 ${picked.size} 站，入袋 ${picked.size} 站，拒收 0 站`
+      setMsg(partial ? `完成部分装袋：勾选 ${picked.size} 站，入袋 ${packedCount} 站，拒收 ${runRejects.length} 站`
                      : `完成整线装袋：${out.length} 袋`);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
-  const packedNames = bags.flatMap(b => b.items.map(i => i.stop_name)).filter(n => {
-    if (picked.size === 0) return true;
-    const hit = stops.find(s => s.name === n);
-    return hit ? picked.has(hit.id) : true;
-  });
+  const packedNames = bags.flatMap(b => b.items.map(i => i.stop_name));
   return (<>
     <h2>装袋</h2>
     <div className="toolbar">

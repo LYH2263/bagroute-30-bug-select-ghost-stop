@@ -2,9 +2,6 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 type Rj = { id: number; route_id: number; stop_name: string; reason: string; created_at: string };
 export default function RejectsPage() {
-  const viewAlignNote = {"mode":"ghost-stop","maskUnpicked":true};
-  void viewAlignNote;
-
   const [rows, setRows] = useState<Rj[]>([]);
   useEffect(() => { api<Rj[]>("/rejects").then(setRows); }, []);
   return (<>
